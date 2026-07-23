@@ -79,3 +79,69 @@ We check the secret handshake (HMAC signature)
   ❌ Bad signature → 401 (go away)
   ✅ Good signature → Save to raw_events table → 200 OK
 That's it. Phase 1 has only one job: catch the webhook, verify it, dump it in the database, and reply fast. Everything else (analyzing the code, grouping into milestones) comes in later phases.
+
+
+
+Phase 1: The Foundation (Gateway & Outbox) - COMPLETE
+The Goal
+Build an Express server that catches GitHub webhooks, verifies they are actually from GitHub (security), and saves the raw data into a Supabase database instantly so GitHub doesn't time out.
+
+Step 1: The Database Setup (Supabase)
+What we did: Created a Supabase project and ran SQL to create a table called raw_events.
+The Columns: id (auto-incrementing), event_type (push/ping), delivery_id (unique tracking number), payload (the raw JSON), status (pending/processed/ignored), created_at.
+The Security: We enabled Row Level Security (RLS). This means the public internet cannot read or write to this table.
+The Keys: We grabbed the SUPABASE_URL and the service_role (Secret) key. We used the Secret key because it acts as an admin pass that bypasses RLS, allowing our trusted backend server to write to the database.
+
+
+Step 2: The .env File (Secrets Management)
+What we did: Created a .env file in VS Code to hold our passwords.
+Why: Hardcoding passwords in index.js is a massive security risk. If we push to GitHub, hackers steal our keys. The .env file stays local and is ignored by Git (via .gitignore).
+Variables inside:
+SUPABASE_URL
+SUPABASE_SERVICE_KEY (Admin bypass key)
+GITHUB_WEBHOOK_SECRET (A made-up shared password for GitHub to use)
+
+Step 3: The Express Server (index.js)
+We wrote the Node.js/Express code. Here is the anatomy of the server:
+
+require('dotenv').config()
+What it does: Tells Node.js to read the .env file and load the passwords into memory (process.env).
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }))
+
+What it does: Grabs a picture of the unopened envelope (the raw bytes) before Express translates it to JSON. We need these exact, untouched bytes to verify GitHub's security stamp.
+The HMAC Security Check (crypto module)
+
+What it does: Takes the req.rawBody, mixes it with our GITHUB_WEBHOOK_SECRET, and creates a SHA256 hash.
+The Comparison: We use crypto.timingSafeEqual to compare our hash to GitHub's hash. We use this instead of === so hackers can't guess the password by measuring how fast our server says "Wrong."
+
+Result: If it fails, we return a 401 Unauthorized.
+The Smart Mailbox (supabase.upsert())
+
+What it does: Takes the JSON payload and saves it to the raw_events table.
+
+The upsert: We use upsert with onConflict: 'delivery_id'. GitHub is impatient and retries if it thinks you didn't reply fast enough. If GitHub sends the same webhook twice, the upsert looks at the tracking number (delivery_id). If it already exists, it doesn't create a duplicate row. Our database stays clean.
+res.status(200).json({ status: 'ok' })
+
+What it does: Instantly tells GitHub "I got the package!" so GitHub doesn't panic and retry.
+
+Step 4: The Public Bridge (Ngrok)
+
+The Problem: GitHub lives on the internet. Our Express server lives on localhost:3000. GitHub cannot reach localhost.
+
+The Solution: We used ngrok http 3000. Ngrok gave us a public URL (https://unwoven-plausible-jinx.ngrok-free.dev) that acts like a bridge. It catches traffic on the internet and funnels it straight into our local laptop's port 3000.
+
+Note: Ngrok URLs change every time you restart it (unless you pay). This is only for local development. Later, we will deploy to a real cloud host for a permanent URL.
+
+Step 5: The GitHub Webhook
+What we did: Went to GitHub Repo -> Settings -> Webhooks -> Add webhook.
+Payload URL: https://unwoven-plausible-jinx.ngrok-free.dev/webhook (Crucial: we had to add /webhook to the end so it matched our Express route, otherwise we got a 404 Not Found).
+Content Type: application/json (If we left this as application/x-www-form-urlencoded, our express.json() parser would refuse to read it, and we would save an empty object to the database).
+
+Secret: my-shadow-secret-123 (Used to generate the HMAC stamp).
+Events: Just the push event.
+Verification Gate 1: The Result
+We made a tiny code change, committed it, and pushed to GitHub.
+GitHub sent the webhook -> Ngrok caught it -> Express verified the signature -> Supabase saved the row -> Server returned 200 OK.
+We looked at the Supabase Table Editor and saw the row sitting there with status: 'pending'.
+
+PHASE 1 IS OFFICIALLY COMPLETE.

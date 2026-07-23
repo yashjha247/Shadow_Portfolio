@@ -16,6 +16,7 @@ app.post('/webhook', async (req, res) => {
   try {
     const signature = req.headers['x-hub-signature-256'];
     const deliveryId = req.headers['x-github-delivery'];
+    const eventType = req.headers['x-github-event'];
 
     if (!signature || !deliveryId) {
       return res.status(401).json({ error: 'Missing signature or delivery ID' });
@@ -35,12 +36,13 @@ app.post('/webhook', async (req, res) => {
     const { error } = await supabase
       .from('raw_events')
       .upsert(
-        { delivery_id: deliveryId, payload: req.body, status: 'pending' },
+        { delivery_id: deliveryId, event_type: eventType, payload: req.body, status: 'pending' },
         { onConflict: 'delivery_id' }
       );
 
     if (error) {
       console.error('Supabase upsert error:', error);
+      require('fs').appendFileSync('error-debug.log', JSON.stringify(error) + '\n');
       return res.status(500).json({ error: 'Database error' });
     }
 
@@ -54,4 +56,5 @@ app.post('/webhook', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
-//testing the github webhook 
+
+require('./worker');
