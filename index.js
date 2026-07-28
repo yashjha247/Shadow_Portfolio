@@ -58,3 +58,8 @@ app.listen(PORT, () => {
 });
 
 require('./worker');
+
+function testRealPipeline() {
+  const score = 7;
+  console.log("Testing real pipeline score:", score);
+}
