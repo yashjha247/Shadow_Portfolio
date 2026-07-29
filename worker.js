@@ -1,5 +1,6 @@
 require('dotenv').config();
 const supabase = require('./supabaseClient');
+const { evaluateDiffWithAI } = require('./aiService');
 
 function evaluateDiff(diffText) {
   if (!diffText) return 0;
@@ -71,10 +72,13 @@ async function processPendingEvents() {
     }
 
     let totalScore = 0;
+    let totalDiffText = '';
+    const commitShas = [];
 
     for (const commit of commits) {
       const commitSha = commit?.id;
       if (!commitSha) continue;
+      commitShas.push(commitSha);
 
       const apiUrl = `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}`;
 
@@ -93,14 +97,106 @@ async function processPendingEvents() {
       }
 
       const diffText = await response.text();
+      totalDiffText += diffText + '\n';
       totalScore += evaluateDiff(diffText);
     }
 
-    const newStatus = totalScore < 5 ? 'ignored' : 'processed';
+    if (totalScore < 5) {
+      const { error: statusError } = await supabase
+        .from('raw_events')
+        .update({ status: 'ignored', significance_score: totalScore })
+        .eq('id', row.id);
+
+      if (statusError) {
+        console.error('Worker status update error:', statusError);
+        await supabase.from('raw_events').update({ status: 'pending' }).eq('id', row.id);
+        return;
+      }
+
+      console.log(`Commit ignored with score ${totalScore}`);
+      return;
+    }
+
+    const { data: recentMilestones, error: milestonesError } = await supabase
+      .from('learning_milestones')
+      .select('*')
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (milestonesError) {
+      console.error('Failed to fetch recent milestones:', milestonesError);
+      await supabase.from('raw_events').update({ status: 'pending' }).eq('id', row.id);
+      return;
+    }
+
+    const aiResponse = await evaluateDiffWithAI(totalDiffText, recentMilestones || []);
+
+    if (!aiResponse) {
+      console.error('AI returned no valid response');
+      await supabase.from('raw_events').update({ status: 'pending' }).eq('id', row.id);
+      return;
+    }
+
+    switch (aiResponse.action) {
+      case 'create': {
+        const { data: newMilestone, error: createError } = await supabase
+          .from('learning_milestones')
+          .insert({
+            title: aiResponse.milestone_title,
+            status: 'active',
+            complexity_score: aiResponse.complexity_score,
+          })
+          .select()
+          .single();
+
+        if (createError || !newMilestone) {
+          console.error('Failed to create milestone:', createError);
+          await supabase.from('raw_events').update({ status: 'pending' }).eq('id', row.id);
+          return;
+        }
+
+        for (const sha of commitShas) {
+          await supabase.from('engineering_commits').insert({
+            commit_hash: sha,
+            milestone_id: newMilestone.id,
+            significance_score: totalScore,
+          });
+        }
+
+        if (aiResponse.extracted_skills && aiResponse.extracted_skills.length > 0) {
+          const skillRows = aiResponse.extracted_skills.map(skill => ({
+            milestone_id: newMilestone.id,
+            skill_name: skill,
+          }));
+          await supabase.from('extracted_skills').insert(skillRows);
+        }
+
+        console.log(`Created milestone "${aiResponse.milestone_title}" with score ${totalScore}`);
+        break;
+      }
+      case 'merge': {
+        for (const sha of commitShas) {
+          await supabase.from('engineering_commits').insert({
+            commit_hash: sha,
+            milestone_id: aiResponse.milestone_id,
+            significance_score: totalScore,
+          });
+        }
+
+        console.log(`Merged into milestone ${aiResponse.milestone_id} with score ${totalScore}`);
+        break;
+      }
+      default: {
+        console.error('Unknown AI action:', aiResponse.action);
+        await supabase.from('raw_events').update({ status: 'pending' }).eq('id', row.id);
+        return;
+      }
+    }
 
     const { error: statusError } = await supabase
       .from('raw_events')
-      .update({ status: newStatus, significance_score: totalScore })
+      .update({ status: 'processed', significance_score: totalScore })
       .eq('id', row.id);
 
     if (statusError) {
@@ -108,8 +204,6 @@ async function processPendingEvents() {
       await supabase.from('raw_events').update({ status: 'pending' }).eq('id', row.id);
       return;
     }
-
-    console.log(`Commit ${newStatus} with total score ${totalScore}`);
   } catch (err) {
     console.error('Worker processing error:', err);
     await supabase.from('raw_events').update({ status: 'pending' }).eq('id', row.id);

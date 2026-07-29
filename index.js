@@ -59,9 +59,16 @@ app.listen(PORT, () => {
 
 require('./worker');
 
-function validatePayload(payload) {
-  if (!payload || !payload.commits || payload.commits.length === 0) {
-    return false;
-  }
-  return true;
+// Triggering webhook again
+function calculateUserStats(userData) {
+  const totalLogins = userData.logins.length;
+  const lastLogin = userData.logins[totalLogins - 1];
+  const isActive = totalLogins > 0;
+  const accountAge = new Date().getFullYear() - userData.createdAt;
+  return { totalLogins, lastLogin, isActive, accountAge };
+}
+
+function testRealPipeline() {
+  const score = 7;
+  console.log("Testing real pipeline score:", score);
 }
