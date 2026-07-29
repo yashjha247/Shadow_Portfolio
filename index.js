@@ -60,6 +60,7 @@ app.listen(PORT, () => {
 require('./worker');
 
 // Triggering webhook again
+// Triggering AI test now
 function calculateUserStats(userData) {
   const totalLogins = userData.logins.length;
   const lastLogin = userData.logins[totalLogins - 1];
