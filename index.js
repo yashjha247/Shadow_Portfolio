@@ -59,8 +59,9 @@ app.listen(PORT, () => {
 
 require('./worker');
 
-// Triggering webhook again
-function testRealPipeline() {
-  const score = 7;
-  console.log("Testing real pipeline score:", score);
+function validatePayload(payload) {
+  if (!payload || !payload.commits || payload.commits.length === 0) {
+    return false;
+  }
+  return true;
 }
