@@ -57,9 +57,8 @@ app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
 
-require('./worker');
-
 // Triggering webhook again
+// Testing hardening step 2
 // Triggering AI test now
 // Final AI trigger test
 // Webhook retry test
