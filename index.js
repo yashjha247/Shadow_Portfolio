@@ -74,3 +74,20 @@ function testRealPipeline() {
   const score = 7;
   console.log("Testing real pipeline score:", score);
 }
+
+function handleDatabaseRetry(dbClient, query) {
+  let attempts = 0;
+  let maxRetries = 3;
+  let success = false;
+  while (attempts < maxRetries && !success) {
+    try {
+      const result = dbClient.execute(query);
+      success = true;
+      return result;
+    } catch (err) {
+      attempts++;
+      console.log(`Retry attempt ${attempts} failed.`);
+    }
+  }
+  throw new Error("Max retries reached");
+}
