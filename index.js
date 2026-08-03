@@ -26,10 +26,14 @@ app.post('/webhook', async (req, res) => {
     hmac.update(req.rawBody);
     const digest = `sha256=${hmac.digest('hex')}`;
 
-    const sigBuf = Buffer.from(signature);
-    const digBuf = Buffer.from(digest);
+    // Hash both values to fixed 32-byte digests before comparison.
+    // This guarantees constant-time, constant-length evaluation
+    // without leaking signature length or throwing TypeError.
+    const h1 = crypto.createHash('sha256').update(signature).digest();
+    const h2 = crypto.createHash('sha256').update(digest).digest();
+    const signaturesMatch = crypto.timingSafeEqual(h1, h2);
 
-    if (sigBuf.length !== digBuf.length || !crypto.timingSafeEqual(sigBuf, digBuf)) {
+    if (!signaturesMatch) {
       return res.status(401).json({ error: 'Invalid signature' });
     }
 
@@ -42,7 +46,6 @@ app.post('/webhook', async (req, res) => {
 
     if (error) {
       console.error('Supabase upsert error:', error);
-      require('fs').appendFileSync('error-debug.log', JSON.stringify(error) + '\n');
       return res.status(500).json({ error: 'Database error' });
     }
 
@@ -56,46 +59,3 @@ app.post('/webhook', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
-
-// Triggering webhook again
-// Testing hardening step 2
-// Triggering AI test now
-// Final AI trigger test
-// Webhook retry test
-function calculateUserStats(userData) {
-  const totalLogins = userData.logins.length;
-  const lastLogin = userData.logins[totalLogins - 1];
-  const isActive = totalLogins > 0;
-  const accountAge = new Date().getFullYear() - userData.createdAt;
-  return { totalLogins, lastLogin, isActive, accountAge };
-}
-
-function testRealPipeline() {
-  const score = 7;
-  console.log("Testing real pipeline score:", score);
-}
-
-function handleDatabaseRetry(dbClient, query) {
-  let attempts = 0;
-  let maxRetries = 3;
-  let success = false;
-  while (attempts < maxRetries && !success) {
-    try {
-      const result = dbClient.execute(query);
-      success = true;
-      return result;
-    } catch (err) {
-      attempts++;
-      console.log(`Retry attempt ${attempts} failed.`);
-    }
-  }
-  throw new Error("Max retries reached");
-}
-
-function calculateAnalyticsMetrics(data) {
-  const totalUsers = data.users.length;
-  const activeUsers = data.users.filter(u => u.isActive).length;
-  const churnRate = (totalUsers - activeUsers) / totalUsers;
-  const revenue = data.payments.reduce((acc, p) => acc + p.amount, 0);
-  return { totalUsers, activeUsers, churnRate, revenue };
-}
