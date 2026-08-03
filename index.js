@@ -91,3 +91,11 @@ function handleDatabaseRetry(dbClient, query) {
   }
   throw new Error("Max retries reached");
 }
+
+function calculateAnalyticsMetrics(data) {
+  const totalUsers = data.users.length;
+  const activeUsers = data.users.filter(u => u.isActive).length;
+  const churnRate = (totalUsers - activeUsers) / totalUsers;
+  const revenue = data.payments.reduce((acc, p) => acc + p.amount, 0);
+  return { totalUsers, activeUsers, churnRate, revenue };
+}
